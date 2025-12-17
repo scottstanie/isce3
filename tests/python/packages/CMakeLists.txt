@@ -1,8 +1,8 @@
 set(TESTFILES
-isce3/antenna/geometry_antenna.py
+# isce3/antenna/geometry_antenna.py  # REMOVED: depends on nisar
 isce3/atmosphere/ionosphere.py
-isce3/atmosphere/tec_products.py
-isce3/cal/corner_reflector.py
+# isce3/atmosphere/tec_products.py  # REMOVED: depends on nisar
+# isce3/cal/corner_reflector.py  # REMOVED: depends on nisar
 isce3/cal/point_target_info.py
 isce3/cal/radar_cross_section.py
 isce3/core/gpu_check.py
@@ -13,9 +13,9 @@ isce3/core/resample_block_generators.py
 isce3/focus/caltone.py
 isce3/focus/valid_regions.py
 isce3/focus/notch.py
-isce3/geocode/geocode_slc.py
+# isce3/geocode/geocode_slc.py  # REMOVED: depends on nisar
 isce3/geometry/bounding_polygon.py
-isce3/geometry/bounding_radar_grid.py
+# isce3/geometry/bounding_radar_grid.py  # REMOVED: depends on nisar
 isce3/geometry/polygons.py
 isce3/geometry/radar_grid_spacing.py
 isce3/image/resample_slc.py
@@ -29,77 +29,12 @@ isce3/signal/doppler_est_func.py
 isce3/signal/fir_filter_func.py
 isce3/signal/rfi_freq_null.py
 isce3/signal/rfi_process_evd.py
-isce3/solid_earth_tides/solid_earth_tides.py
-nisar/antenna/beamformer.py
-nisar/antenna/pattern.py
-nisar/cal/corner_reflector_slc_func.py
-nisar/cal/corner_reflector.py
-nisar/cal/faraday_rotation_angle_slc.py
-nisar/cal/pol_channel_imbalance_slc.py
-nisar/mixed_mode/logic.py
-nisar/mixed_mode/processing.py
-nisar/noise/noise_estimation_from_raw.py
-nisar/pointing/doppler_lut_from_raw.py
-#nisar/pointing/el_null_range_from_raw_ant.py
-nisar/products/granule_id.py
-nisar/products/readers/antenna_parser.py
-nisar/products/readers/attitude.py
-nisar/products/readers/GSLC.py
-nisar/products/readers/instrument_parser.py
-nisar/products/readers/orbit.py
-nisar/products/readers/raw.py
-nisar/products/readers/rslc.py
-nisar/products/readers/rslc_cal.py
-nisar/products/product_spec.py
-nisar/products/projection.py
-nisar/products/utils.py
-nisar/static/ephemeris.py
-nisar/static/geo_grid.py
-nisar/static/granule_id.py
-nisar/static/product.py
-nisar/static/runconfig.py
-nisar/static/water_mask.py
-nisar/workflows/crossmul.py
-nisar/workflows/estimate_abscal_factor.py
-nisar/workflows/faraday_rot_angle_from_rslc.py
-nisar/workflows/focus.py
-nisar/workflows/gen_doppler_range_product.py
-nisar/workflows/stage_dem.py
-nisar/workflows/gcov.py
-nisar/workflows/geo2rdr.py
-nisar/workflows/geocode_insar.py
-#nisar/workflows/gen_el_null_range_product.py
-nisar/workflows/gen_el_rising_edge_product.py
-nisar/workflows/gslc.py
-nisar/workflows/gslc_point_target_analysis.py
-nisar/workflows/helpers.py
-nisar/workflows/insar.py
-nisar/workflows/filter_interferogram.py
-nisar/workflows/bandpass_insar.py
-nisar/workflows/ionosphere.py
-nisar/workflows/troposphere.py
-nisar/workflows/solid_earth_tides.py
-nisar/workflows/baseline.py
-nisar/workflows/process_args.py
-nisar/workflows/rdr2geo.py
-nisar/workflows/resample_slc.py
-nisar/workflows/resample_slc_v2.py
-nisar/workflows/static.py
-nisar/workflows/unwrap.py
-nisar/workflows/point_target_analysis.py
-nisar/workflows/nisar_l0b_dm1_to_science.py
-nisar/workflows/nisar_l0b_dm2_to_dbf.py
-nisar/workflows/noise_estimator.py
-nisar/workflows/pol_channel_imbalance_from_rslc.py
-nisar/workflows/geocode_corrections.py
+# isce3/solid_earth_tides/solid_earth_tides.py  # REMOVED: depends on nisar
 )
 
 if(WITH_CUDA)
     list(APPEND TESTFILES
         isce3/cuda/image/resample_slc.py
-        nisar/workflows/dense_offsets.py
-        nisar/workflows/rubbersheet.py
-        nisar/workflows/cuda_insar.py
     )
 endif()
 
@@ -111,41 +46,8 @@ foreach(TESTFILE ${TESTFILES})
     add_test(${TESTNAME} ${PYTEST_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/${TESTFILE})
     set_property(TEST ${TESTNAME} PROPERTY ENVIRONMENT
         LD_LIBRARY_PATH=${PYTEST_LD_LIBRARY_PATH}
+        DYLD_FALLBACK_LIBRARY_PATH=${PYTEST_DYLD_FALLBACK_LIBRARY_PATH}
         PYTHONPATH=${PYTEST_PYTHONPATH})
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${DIR})
     set_property(TEST ${TESTNAME} PROPERTY WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${DIR})
 endforeach()
-
-
-set_tests_properties(test.python.pkg.nisar.workflows.geo2rdr PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.rdr2geo)
-set_tests_properties(test.python.pkg.nisar.workflows.resample_slc PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.geo2rdr)
-set_tests_properties(test.python.pkg.nisar.workflows.resample_slc_v2 PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.geo2rdr)
-
-# crossmul doesn't technically require resample_slc_v2, but resample_slc_v2 needs to be
-# run before other dependent tests or files that it depends on will be overwritten
-# and it will fail.
-set_tests_properties(test.python.pkg.nisar.workflows.crossmul PROPERTIES
-             DEPENDS "test.python.pkg.nisar.workflows.resample_slc;test.python.pkg.nisar.workflows.resample_slc_v2")
-set_tests_properties(test.python.pkg.nisar.workflows.filter_interferogram PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.crossmul)
-
-set_tests_properties(test.python.pkg.nisar.products.readers.GSLC PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.gslc)
-
-# using rdr2geo outputs as RUNW rasters to confirm geocode run
-# using RUNW HDF5 needed as a verifiable dummy RUNW input
-set_tests_properties(test.python.pkg.nisar.workflows.geocode_insar PROPERTIES
-             DEPENDS "test.python.pkg.nisar.workflows.rdr2geo;test.python.pkg.nisar.workflows.unwrap")
-
-set_tests_properties(test.python.pkg.nisar.workflows.insar PROPERTIES
-             DEPENDS test.python.pkg.nisar.workflows.geocode_insar)
-
-if(WITH_CUDA)
-    set_tests_properties(test.python.pkg.nisar.workflows.dense_offsets PROPERTIES
-                 DEPENDS test.python.pkg.nisar.workflows.cuda_insar)
-    set_tests_properties(test.python.pkg.nisar.workflows.rubbersheet PROPERTIES
-                 DEPENDS test.python.pkg.nisar.workflows.cuda_insar)
-endif()
