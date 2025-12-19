@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 
 from osgeo import gdal
 import numpy as np
 
+# Add test_helpers to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+
 import iscetest
 import isce3.ext.isce3 as isce3
-from nisar.products.readers import SLC
+from test_helpers import SLC
 
 
 def test_run():

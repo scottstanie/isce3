@@ -24,13 +24,13 @@ focus/presum.py
 focus/rangecomp.py
 # geocode/geocodeCov.py  # REMOVED: depends on nisar
 # geocode/radar_grid_cube.py  # REMOVED: depends on nisar
-# geometry/bbox.py  # REMOVED: depends on nisar
+# geometry/bbox.py  # REMOVED: depends on nisar (complex dependencies)
 geometry/dem.py
-# geometry/geo2rdr.py  # REMOVED: depends on nisar
-# geometry/rdr2geo.py  # REMOVED: depends on nisar
-# geometry/rtc.py  # REMOVED: depends on nisar
-# geometry/metadata_cubes.py  # REMOVED: depends on nisar
-# image/resamp.py  # REMOVED: depends on nisar
+geometry/geo2rdr.py
+geometry/rdr2geo.py
+# geometry/rtc.py  # REMOVED: depends on nisar (complex dependencies)
+# geometry/metadata_cubes.py  # REMOVED: depends on nisar (complex dependencies)
+image/resamp.py
 io/decode_bfpq_lut.py
 io/gdal/dataset.py
 io/gdal/raster.py
@@ -87,10 +87,6 @@ foreach(TESTFILE ${TESTFILES})
     set_property(TEST ${TESTNAME} PROPERTY WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${DIR})
 endforeach()
 
-# Test dependencies removed - geo2rdr and rdr2geo tests depend on nisar
-# set_tests_properties(test.python.pybind.geometry.geo2rdr PROPERTIES
-#              DEPENDS test.python.pybind.geometry.rdr2geo)
-# if(WITH_CUDA)
-#     set_tests_properties(test.python.pybind.cuda.geometry.geo2rdr PROPERTIES
-#                  DEPENDS test.python.pybind.cuda.geometry.rdr2geo)
-# endif()
+# Re-enabled with test_helpers.SLC replacement
+set_tests_properties(test.python.pybind.geometry.geo2rdr PROPERTIES
+             DEPENDS test.python.pybind.geometry.rdr2geo)

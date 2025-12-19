@@ -2,17 +2,21 @@
 
 import itertools
 import os
+import sys
 import types
 
 from osgeo import gdal
 import numpy as np
 import pytest
 
+# Add test_helpers to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+
 import iscetest
 import isce3
 from isce3.geometry import (compute_east_north_ground_to_sat_vector,
                             Rdr2GeoParams)
-from nisar.products.readers import SLC
+from test_helpers import SLC
 
 
 def test_point():

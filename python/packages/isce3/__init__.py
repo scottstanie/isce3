@@ -21,7 +21,11 @@ from . import noise
 from . import polsar
 from . import product
 from . import signal
-from . import solid_earth_tides
+# solid_earth_tides requires pysolid (optional dependency)
+try:
+    from . import solid_earth_tides
+except ImportError:
+    pass  # pysolid not available
 from . import splitspectrum
 from . import unwrap
 
