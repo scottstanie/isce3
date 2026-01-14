@@ -12,6 +12,7 @@
 
 #include <iostream>
 #include <isce3/except/Error.h>
+#include <isce3/io/gdal/detail/GDALGeoTransformUtil.h>
 
 //Constructor to map a raw stream to a Raster
 inline void isce3::io::Raster::initFromPointer(void* ptr,  //Raw pointer
@@ -456,7 +457,7 @@ void isce3::io::Raster::setBlock(isce3::core::EMatrix2D<T>& mat, size_t xidx, si
  * No memory check performed for length of array*/
 inline void isce3::io::Raster::setGeoTransform(double* arr)
 {
-    int status = _dataset->SetGeoTransform(arr);
+    int status = isce3::io::gdal::detail::setGeoTransform(_dataset, arr);
     if (status != 0) {
         throw isce3::except::RuntimeError(ISCE_SRCINFO(), "Could not set GDAL GeoTransform");
     }
@@ -488,7 +489,7 @@ inline void isce3::io::Raster::setGeoTransform(std::valarray<double>& arr)
  * No memory check is performed*/
 inline void isce3::io::Raster::getGeoTransform(double *arr) const
 {
-    int status = _dataset->GetGeoTransform(arr);
+    int status = isce3::io::gdal::detail::getGeoTransform(_dataset, arr);
     if (status != 0) {
         throw isce3::except::RuntimeError(ISCE_SRCINFO(), "Could not fetch GDAL GeoTransform");
     }

@@ -7,6 +7,7 @@
 
 #include "Raster.h"
 #include "SpatialReference.h"
+#include "detail/GDALGeoTransformUtil.h"
 
 namespace isce3 { namespace io { namespace gdal {
 
@@ -149,7 +150,7 @@ Raster Dataset::getRaster(int band) const
 GeoTransform Dataset::getGeoTransform() const
 {
     std::array<double, 6> coeffs;
-    CPLErr status = _dataset->GetGeoTransform(coeffs.data());
+    CPLErr status = detail::getGeoTransform(_dataset.get(), coeffs.data());
     return (status == CE_None) ? GeoTransform(coeffs) : GeoTransform();
 }
 
@@ -160,7 +161,7 @@ void Dataset::setGeoTransform(const GeoTransform & transform)
     }
 
     std::array<double, 6> coeffs = transform.getCoeffs();
-    CPLErr status = _dataset->SetGeoTransform(coeffs.data());
+    CPLErr status = detail::setGeoTransform(_dataset.get(), coeffs.data());
     if (status != CE_None) {
         throw isce3::except::GDALError(ISCE_SRCINFO(), "unable to set geotransform");
     }
