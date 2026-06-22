@@ -29,7 +29,8 @@ from isce3.unwrap.preprocess import project_map_to_radar
 from nisar.products.insar.product_paths import (CommonPaths, RIFGGroupsPaths,
                                                 RUNWGroupsPaths)
 from nisar.products.readers import SLC
-from nisar.products.utils import deepcopy_runconfig_and_keep_isce3_obj
+from nisar.products.utils import (deepcopy_runconfig_and_keep_isce3_obj,
+                                  interpret_subswath_mask)
 from nisar.workflows import (crossmul, filter_interferogram, h5_prep,
                              prepare_insar_hdf5, resample_slc_v2, unwrap)
 from nisar.workflows.compute_stats import compute_stats_real_hdf5_dataset
@@ -236,6 +237,67 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
                             file_type='ENVI')
 
 
+def add_binary_mask_to_bit24(existing_mask,
+                             new_binary_mask,
+                             existing_range_array=None,
+                             new_range_array=None):
+    """
+    Encode a boolean mask into bit 24 of an existing 32-bit integer mask.
+    If shapes differ, resample new_binary_mask to existing_mask grid.
+    """
+    existing_mask = np.asarray(existing_mask, dtype=np.uint32)
+    new_binary_mask = np.asarray(new_binary_mask, dtype=bool)
+
+    if existing_mask.shape != new_binary_mask.shape:
+        if existing_range_array is None or new_range_array is None:
+            raise ValueError(
+                "existing_range_array and new_range_array are required "
+                "when shapes differ."
+            )
+        new_binary_mask = interpolate_freq_b_array(
+            existing_range_array,
+            new_range_array,
+            new_binary_mask
+        ).astype(bool)
+
+    if existing_mask.shape != new_binary_mask.shape:
+        raise ValueError(
+            f"Shape mismatch after interpolation: "
+            f"existing_mask={existing_mask.shape}, "
+            f"new_binary_mask={new_binary_mask.shape}"
+        )
+
+    cleared_mask = existing_mask & np.uint32(0xFEFFFFFF)
+    shifted_new_bits = new_binary_mask.astype(np.uint32) << 24
+
+    return cleared_mask | shifted_new_bits
+
+
+def update_hdf5_mask_bit24_block(
+        h5_file,
+        mask_dataset_path,
+        new_binary_mask,
+        row_start,
+        existing_range_array=None,
+        new_range_array=None):
+
+    dst_mask = h5_file[mask_dataset_path]
+
+    block_rows = new_binary_mask.shape[0]
+
+    existing_mask = dst_mask[
+        row_start:row_start + block_rows, :
+    ]
+
+    updated_mask = add_binary_mask_to_bit24(
+        existing_mask=existing_mask,
+        new_binary_mask=new_binary_mask,
+        existing_range_array=existing_range_array,
+        new_range_array=new_range_array)
+
+    dst_mask[row_start:row_start + block_rows, :] = updated_mask
+
+
 def copy_iono_datasets(iono_insar_cfg,
                        input_runw,
                        output_runw,
@@ -365,16 +427,21 @@ def copy_iono_datasets(iono_insar_cfg,
                     compute_stats_real_hdf5_dataset(dst_h5[dst_iono_path])
 
 
-def compute_differential_phase(phase_first,
-                               phase_second,
-                               output_path,
-                               first_data_path,
-                               second_data_path,
-                               output_data_path,
-                               lines_per_block,
-                               first_slant_path=None,
-                               second_slant_path=None,
-                               ):
+def compute_differential_phase(
+        phase_first,
+        phase_second,
+        output_path,
+        first_data_path,
+        second_data_path,
+        output_data_path,
+        lines_per_block,
+        first_slant_path=None,
+        second_slant_path=None,
+        subswath_mask_enabled=False,
+        first_mask_path=None,
+        second_mask_path=None,
+        invalid_fill_value=0,
+    ):
     """
     Compute a differential phase by multiplying the first complex phase
     dataset with the complex conjugate of the second dataset, then write
@@ -410,6 +477,19 @@ def compute_differential_phase(phase_first,
     second_slant_path : str, optional
         Dataset path in `phase_second` containing slant-range information (used
         for resampling). If `None`, no resampling is performed.
+    subswath_mask_enabled : bool, optional
+        If True, apply invalid-region masking using subswath mask datasets.
+        Default is False.
+    first_mask_path : str or list[str], optional
+        Dataset path(s) to subswath mask raster(s) in `phase_first`.
+        If a string is given, the same mask path is used for all datasets.
+        If a list is given, it must have the same length as `first_data_path`.
+    second_mask_path : str or list[str], optional
+        Dataset path(s) to subswath mask raster(s) in `phase_second`.
+        If a string is given, the same mask path is used for all datasets.
+        If a list is given, it must have the same length as `second_data_path`.
+    invalid_fill_value : scalar, optional
+        Value written to output pixels marked invalid by the mask. Default is 0.
 
     Returns
     -------
@@ -427,10 +507,18 @@ def compute_differential_phase(phase_first,
         # Cast to float to avoid integer exponentiation issues
         return np.exp(1j * arr)
 
+    if subswath_mask_enabled:
+        if first_mask_path is None or second_mask_path is None:
+            raise ValueError(
+                "When `subswath_mask_enabled=True`, both `first_mask_path` and "
+                "`second_mask_path` must be provided."
+            )
     # Check if reading and writing will happen on the same file
     is_same_file_first_output = (phase_first == output_path)
     is_same_file_first_second = (phase_first == phase_second)
 
+    src_sec_h5 = None
+    src_out_h5 = None
     # Open the relevant HDF5 files in appropriate modes
     with HDF5OptimizedReader(name=phase_first,
                              mode='r' if not is_same_file_first_output else 'a',
@@ -463,7 +551,9 @@ def compute_differential_phase(phase_first,
                 phase_first_raster = src_first_h5[first_ifg_path]
                 phase_second_raster = src_sec_h5[second_ifg_path]
                 output_data_raster = src_out_h5[out_ifg_path]
-
+                if subswath_mask_enabled:
+                    first_mask_raster = src_first_h5[first_mask_path]
+                    second_mask_raster = src_sec_h5[second_mask_path]
                 # Generate block parameters for reading/writing
                 block_params_main = block_param_generator(
                     lines_per_block,
@@ -483,31 +573,78 @@ def compute_differential_phase(phase_first,
                         block_params_main, block_params_side):
                     first_data_block = get_raster_block(phase_first_raster,
                                                         block_param_main)
+                    if subswath_mask_enabled:
+                        first_mask_block = get_raster_block(
+                            first_mask_raster,
+                            block_param_main)
                     if resampling_flag:
                         second_data_block = get_raster_block(
                             phase_second_raster,
                             block_param_side)
                         chosen_block_param = block_param_side
+                        if subswath_mask_enabled:
+                            second_mask_block = get_raster_block(
+                                second_mask_raster,
+                                block_param_side)
                     else:
                         second_data_block = get_raster_block(
                             phase_second_raster,
                             block_param_main)
                         chosen_block_param = block_param_main
+                        if subswath_mask_enabled:
+                            second_mask_block = get_raster_block(
+                                second_mask_raster,
+                                block_param_main)
 
                     # Ensure complex (convert real-valued phase in radians to
                     # complex phase)
                     first_data_block = _to_complex_if_needed(first_data_block)
                     second_data_block = _to_complex_if_needed(second_data_block)
 
-                    # Optional resampling of FIRST to SECOND grid
+                    # Resample first dataset (frequency A / low subband) to
+                    # match the grid of the second dataset (frequency B / high subband).
+                    # This ensures pixel-wise alignment before phase differencing.
                     if resampling_flag:
                         first_data_block = decimate_freq_a_array(
                             main_slant,
                             side_slant,
                             first_data_block)
+                        if subswath_mask_enabled:
+                            first_mask_block = decimate_freq_a_array(
+                                main_slant,
+                                side_slant,
+                                first_mask_block)
+
+                    if subswath_mask_enabled:
+                        # Interpretation of input datasets depends on the
+                        # processing context:
+                        # - For main_diff_ms_band:
+                        #     first  → frequency A
+                        #     second → frequency B
+                        # - For main_diff_low_high_subband:
+                        #     first  → low subband
+                        #     second → high subband
+                        # Each mask provides:
+                        #   - reference_valid: valid pixels in reference region
+                        #   - secondary_valid: valid pixels in secondary region
+                        first_reference_valid, first_secondary_valid, _ = \
+                            interpret_subswath_mask(first_mask_block)
+                        second_reference_valid, second_secondary_valid, _ = \
+                            interpret_subswath_mask(second_mask_block)
+                        invalid = (
+                            (~first_reference_valid) |
+                            (~first_secondary_valid) |
+                            (~second_reference_valid) |
+                            (~second_secondary_valid)
+                        )
+                    else:
+                        invalid = None
 
                     # Compute the differential phase
                     diff_phase = first_data_block * np.conj(second_data_block)
+
+                    if invalid is not None:
+                        diff_phase[invalid] = invalid_fill_value
 
                     # Write result block to output
                     write_raster_block(output_data_raster,
@@ -626,6 +763,9 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
     if unwrap_mask_type == 'water':
         # Either set to a default value or delete the key entirely.
         prep_wrapped_phase_cfg['enabled'] = True
+    if prep_wrapped_phase_cfg['enabled'] is True and \
+       unwrap_mask_type == 'subswath_mask':
+        subswath_mask_enabled = True
 
     if iono_method in ['split_main_band', 'main_diff_low_high_subband']:
         # For split_main_band, two sub-band interferograms need to be
@@ -805,6 +945,7 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
                                             'ionosphere',
                                             'main_diff_ms_band',
                                             'RIFG.h5')
+
             else:
                 out_paths = original_out_paths
                 new_scratch = orig_scratch_path
@@ -812,6 +953,7 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
                 additional_runw = out_paths['RUNW']
 
             diff_phase_output = pathlib.Path(diff_dir, 'RIFG.h5')
+
             iono_insar_cfg['product_path_group'][
                 'scratch_path'] = diff_dir
             iono_insar_cfg['product_path_group'][
@@ -843,15 +985,18 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
 
                 first_data_path.append(runw_path_freq)
             first_slant_path = f"{dest_freq_path}/interferogram/slantRange"
+            first_mask_path = f"{dest_freq_path}/interferogram/mask"
+
             second_data_path = []
             for pol_b in pol_list_b:
-
                 dest_freq_path = f"{swath_path}/frequencyB"
                 dest_pol_path = f"{dest_freq_path}/interferogram/{pol_b}"
                 rifg_path_freq = f"{dest_pol_path}/wrappedInterferogram"
 
                 second_data_path.append(rifg_path_freq)
+
             second_slant_path = f"{dest_freq_path}/interferogram/slantRange"
+            second_mask_path = f"{dest_freq_path}/interferogram/mask"
 
             output_data_path = second_data_path
             compute_differential_phase(phase_first,
@@ -862,7 +1007,10 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
                                        output_data_path,
                                        iono_args['lines_per_block'],
                                        first_slant_path=first_slant_path,
-                                       second_slant_path=second_slant_path)
+                                       second_slant_path=second_slant_path,
+                                       subswath_mask_enabled=subswath_mask_enabled,
+                                       first_mask_path=first_mask_path,
+                                       second_mask_path=second_mask_path)
 
             # Since main_diff_low_high_subband method does not need to
             # unwrap low and high subband interferogram, but need to
@@ -994,6 +1142,12 @@ def run(cfg: dict, runw_hdf5: str):
     kernel_sigma_range = filter_cfg['sigma_range']
     kernel_sigma_azimuth = filter_cfg['sigma_azimuth']
     filling_method = filter_cfg['filling_method']
+    filling_guide_filter_method = filter_cfg['filling_guide_filter_method']
+    filling_guide_median_size = filter_cfg['filling_guide_median_size']
+    filling_outlier_threshold = filter_cfg['filling_outlier_threshold']
+    filling_outlier_min_scale = filter_cfg['filling_outlier_min_scale']
+    filling_outlier_mad_scale_factor = filter_cfg['filling_outlier_mad_scale_factor']    
+
     filter_iterations = filter_cfg['filter_iterations']
     median_filter_size = filter_cfg['median_filter_size']
     median_filter_threshold = filter_cfg['median_filter_threshold']
@@ -1119,7 +1273,26 @@ def run(cfg: dict, runw_hdf5: str):
         sig_y=kernel_sigma_azimuth,
         iteration=filter_iterations,
         filling_method=filling_method,
+        guide_filter_method=filling_guide_filter_method,
+        guide_median_size=filling_guide_median_size,
+        outlier_threshold=filling_outlier_threshold,
+        outlier_min_scale=filling_outlier_min_scale,
+        mad_scale_factor=filling_outlier_mad_scale_factor,
         outputdir=os.path.join(iono_path, iono_method))
+
+    # compute the full water masks
+    water_mask_b_blk = None
+    water_mask_a_blk = None
+    if "water" in mask_type and filter_bool:
+        water_mask_path = cfg[
+            "dynamic_ancillary_file_group"]["water_mask_file"]
+
+        water_distance_a = project_map_to_radar(cfg, water_mask_path, 'A')
+        water_mask_a = (water_distance_a == 0)
+
+        if iono_method in iono_method_sideband:
+            water_distance_b = project_map_to_radar(cfg, water_mask_path, 'B')
+            water_mask_b = (water_distance_b == 0)
 
     # pull parameters for polarizations
     pol_list_a = list(iono_freq_pols['A'])
@@ -1294,6 +1467,10 @@ def run(cfg: dict, runw_hdf5: str):
                         [block_rows_data, cols_main],
                         dtype=int)
 
+                if "water" in mask_type:
+                    water_mask_a_blk = None if water_mask_a is None else \
+                        water_mask_a[row_start:row_start + block_rows_data, :]
+
                 if iono_method == 'main_diff_low_high_subband':
                     main_image = np.empty([block_rows_data, cols_main],
                                           dtype=float)
@@ -1459,6 +1636,15 @@ def run(cfg: dict, runw_hdf5: str):
                     subswath_mask_side_image = np.empty(
                         [block_rows_data, cols_side],
                         dtype=int)
+
+                if "water" in mask_type:
+                    water_mask_a_blk = None if water_mask_a is None \
+                        else water_mask_a[row_start:row_start +
+                                          block_rows_data, :]
+
+                    water_mask_b_blk = None if water_mask_b is None \
+                        else water_mask_b[row_start:row_start +
+                                          block_rows_data, :]
 
                 with HDF5OptimizedReader(
                         name=runw_freq_a_str, mode='r',
@@ -1741,15 +1927,10 @@ def run(cfg: dict, runw_hdf5: str):
                     # boundary of the water bodies. The values 0-100 represent
                     # the distance from the coastline and values from 101-200
                     # represent the distance from inland water boundaries.
-                    water_mask_path = \
-                            cfg["dynamic_ancillary_file_group"][
-                                "water_mask_file"]
-                    water_distance = project_map_to_radar(
-                        cfg,
-                        water_mask_path,
-                        'A')
-                    mask_image = water_distance[
-                        row_start:row_start + block_rows_data, :] == 0
+                    if iono_method in iono_method_sideband:
+                        mask_image = water_mask_b_blk
+                    else:
+                        mask_image = water_mask_a_blk
                     mask_array = mask_array & mask_image
 
                 valid_area = iono_phase_obj.get_valid_area(
@@ -1773,6 +1954,7 @@ def run(cfg: dict, runw_hdf5: str):
                     slant_main=main_slant,
                     slant_side=side_slant,
                     invalid_value=0)
+                final_iono_mask = mask_array & valid_area & valid_area_coh
 
                 mask_path = os.path.join(
                     iono_path, iono_method, pol_comb_str, 'mask_array')
@@ -1780,17 +1962,35 @@ def run(cfg: dict, runw_hdf5: str):
                 # ENVI format files
                 write_array(
                     mask_path,
-                    mask_array & valid_area & valid_area_coh,
+                    final_iono_mask,
                     data_type=gdal.GDT_Float32,
                     block_row=row_start,
                     data_shape=[rows_output, cols_output])
+
+                if iono_method in iono_method_sideband:
+                    existing_range = main_slant
+                    new_range = side_slant
+
+                else:
+                    existing_range = None
+                    new_range = None
+
+                with HDF5OptimizedReader(name=runw_path_insar, mode='a',
+                                         libver='latest') as dst_h5:
+                    update_hdf5_mask_bit24_block(
+                        dst_h5,
+                        subswath_mask_freq_a_path,
+                        final_iono_mask,
+                        row_start=row_start,
+                        existing_range_array=existing_range,
+                        new_range_array=new_range)
 
         if filter_bool:
             # if unwrapping correction technique is not requested,
             # save output to hdf5 at this point
             if not unwrap_correction_bool:
                 with HDF5OptimizedReader(name=iono_output, mode='a',
-                                         libver='latest', swmr=True) as dst_h5:
+                                         libver='latest') as dst_h5:
                     iono_hdf5_path = dst_h5[
                         f'{output_pol_path}/ionospherePhaseScreen']
                     iono_sig_hdf5_path = \
@@ -1805,7 +2005,8 @@ def run(cfg: dict, runw_hdf5: str):
                         filtered_output=iono_hdf5_path,
                         filtered_std_dev=iono_sig_hdf5_path,
                         lines_per_block=blocksize,
-                        min_cluster_pixels=min_cluster_pixels)
+                        min_cluster_pixels=min_cluster_pixels
+                        )
                 # oversample ionosphere of frequencyB to frequencyA
                 # and copy them to standard RUNW product.
                 if iono_method in iono_method_sideband:
@@ -1829,7 +2030,8 @@ def run(cfg: dict, runw_hdf5: str):
                     filtered_output=filt_disp_path,
                     filtered_std_dev=filt_disp_sig_path,
                     lines_per_block=blocksize,
-                    min_cluster_pixels=min_cluster_pixels)
+                    min_cluster_pixels=min_cluster_pixels,
+                    )
 
                 # low pass filtering for non-dispersive phase
                 filt_nondisp_path = os.path.join(
@@ -1845,7 +2047,8 @@ def run(cfg: dict, runw_hdf5: str):
                     filtered_output=filt_nondisp_path,
                     filtered_std_dev=filt_nondisp_sig_path,
                     lines_per_block=blocksize,
-                    min_cluster_pixels=min_cluster_pixels)
+                    min_cluster_pixels=min_cluster_pixels,
+                    )
 
                 disp_tif = gdal.Open(filt_disp_path)
                 disp_width = disp_tif.RasterXSize
@@ -2090,7 +2293,7 @@ def run(cfg: dict, runw_hdf5: str):
                         data_shape=[rows_output, cols_output])
 
                 with HDF5OptimizedReader(name=iono_output, mode='a',
-                                         libver='latest', swmr=True) as dst_h5:
+                                         libver='latest') as dst_h5:
                     iono_hdf5_path = dst_h5[f'{output_pol_path}/ionospherePhaseScreen']
                     iono_sig_hdf5_path = \
                         dst_h5[f'{output_pol_path}/ionospherePhaseScreenUncertainty']
@@ -2102,7 +2305,8 @@ def run(cfg: dict, runw_hdf5: str):
                         filtered_output=iono_hdf5_path,
                         filtered_std_dev=iono_sig_hdf5_path,
                         lines_per_block=blocksize,
-                        min_cluster_pixels=min_cluster_pixels)
+                        min_cluster_pixels=min_cluster_pixels,
+                        )
                 # oversample ionosphere of frequencyB to frequencyA
                 # and copyt them to standard RUNW product.
                 if iono_method in iono_method_sideband:
