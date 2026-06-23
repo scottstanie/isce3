@@ -810,6 +810,23 @@ runconfig:
                     # `ntiles` is (1, 1). It has no effect if `single_tile_reoptimize` was also
                     #  enabled (since regrowing connected components would be redundant in that case).
                     regrow_conncomps: True
+                whirlwind:
+                    # Effective number of looks of the input coherence. If left
+                    # blank it is estimated the same way as snaphu's nlooks.
+                    nlooks:
+                    # File path to a binary valid-pixel mask (nonzero = valid).
+                    mask:
+                    # Re-level 2*pi offsets between mask-disconnected regions.
+                    # whirlwind's built-in post-pass; the generic isce3 bridge
+                    # step is skipped for the whirlwind algorithm.
+                    bridge: True
+                    # Coarse-solve factor for noisy scenes (1 = off).
+                    downsample: 1
+                    # Connected-component conservativeness (1/sigma^2 units).
+                    # 0 = calibration-free SNAPHU wiggle test.
+                    conncomp_reliability: 0.0
+                    # Goldstein adaptive-filter strength in [0, 1] (0 = off).
+                    goldstein_alpha: 0.0
                 bridge:
                     enabled: True
                     # Maximum radius used when bridging disconnected regions.

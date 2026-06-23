@@ -314,6 +314,57 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                     unw_raster = isce3.io.Raster(unw_raster_path)
                     compute_stats_real_data(unw_raster, unw_dataset)
 
+                elif algorithm == "whirlwind":
+                    info_channel.log("Unwrapping with whirlwind")
+                    # Imported lazily so isce3 does not hard-depend on whirlwind
+                    # unless this algorithm is selected.
+                    import whirlwind as ww
+
+                    ww_cfg = unwrap_args["whirlwind"]
+
+                    # whirlwind takes the COMPLEX interferogram + coherence as
+                    # arrays and returns (unwrapped_phase, connected_components).
+                    igram_array = open_raster(igram_path)
+                    coh_array = open_raster(corr_path)
+
+                    # Valid-pixel mask (True = valid). Combine an optional mask
+                    # file (SNAPHU convention: nonzero = valid) with the
+                    # preprocess invalid-pixel mask, if either is present.
+                    valid = None
+                    if ww_cfg.get("mask") is not None:
+                        valid = open_raster(ww_cfg["mask"]) != 0
+                    if (unwrap_args["preprocess_wrapped_phase"]["enabled"]
+                            and mask is not None):
+                        valid = ~mask if valid is None else (valid & ~mask)
+
+                    # Effective number of looks (same estimate as snaphu).
+                    if ww_cfg.get("nlooks") is not None:
+                        nlooks = ww_cfg["nlooks"]
+                    else:
+                        rg_spacing = src_h5[f"{src_freq_group_path}/interferogram/slantRangeSpacing"][()]
+                        az_spacing = src_h5[f"{src_freq_group_path}/interferogram/sceneCenterAlongTrackSpacing"][()]
+                        rg_bw = src_h5[f"{src_freq_bandwidth_group_path}/rangeBandwidth"][()]
+                        az_bw = src_h5[f"{src_freq_bandwidth_group_path}/azimuthBandwidth"][()]
+                        nlooks = get_effective_looks(ref_slc, ref_orbit, rg_spacing,
+                                                     az_spacing, rg_bw, az_bw, freq=freq)
+
+                    unw_array, conncomp_array = ww.unwrap(
+                        igram_array.astype(np.complex64, copy=False),
+                        coh_array.astype(np.float32, copy=False),
+                        float(nlooks),
+                        valid,
+                        bridge=ww_cfg.get("bridge", True),
+                        downsample=ww_cfg.get("downsample", 1),
+                        conncomp_reliability=ww_cfg.get("conncomp_reliability", 0.0),
+                        goldstein_alpha=ww_cfg.get("goldstein_alpha", 0.0),
+                    )
+                    dst_h5[unw_path][:, :] = unw_array
+                    dst_h5[conn_comp_path][:, :] = conncomp_array
+
+                    # Compute statistics
+                    unw_raster = isce3.io.Raster(unw_raster_path)
+                    compute_stats_real_data(unw_raster, unw_dataset)
+
                 else:
                     err_str = f"{algorithm} is an invalid unwrapping algorithm"
                     error_channel.log(err_str)
@@ -321,7 +372,10 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                 # Clean up unwrapped phase raster
                 del unw_raster
 
-                if bridge_cfg['enabled']:
+                # whirlwind has its own integration-component bridge post-pass
+                # (controlled by phase_unwrap.whirlwind.bridge), so skip the
+                # generic isce3 bridge for it to avoid double-bridging.
+                if bridge_cfg['enabled'] and algorithm != "whirlwind":
                     unwrapped_phase = dst_h5[unw_path][()]
                     if unwrap_args["preprocess_wrapped_phase"]["enabled"]:
                         if mask is not None:

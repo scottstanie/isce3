@@ -178,7 +178,7 @@ troposphere_weather_model_options:
 phase_unwrap_options:
     crossmul_path: str(required=False)
 
-    algorithm: enum('icu', 'phass', 'snaphu', required=False)
+    algorithm: enum('icu', 'phass', 'snaphu', 'whirlwind', required=False)
 
     range_looks: int(min=1, required=False)
 
@@ -189,6 +189,8 @@ phase_unwrap_options:
     phass: include('phass_options', required=False)
 
     snaphu: include('snaphu_options', required=False)
+
+    whirlwind: include('whirlwind_options', required=False)
 
     preprocess_wrapped_phase: include('preprocess_wrapped_phase_options', required=False)
 
@@ -235,6 +237,28 @@ snaphu_options:
     min_region_size: int(min=1, required=False)
     single_tile_reoptimize: bool(required=False)
     regrow_conncomps: bool(required=False)
+
+whirlwind_options:
+    # Effective number of looks of the input coherence. If not specified it is
+    # estimated the same way as for snaphu (see snaphu_options.nlooks).
+    nlooks: num(min=1, required=False)
+    # File path to a binary mask of valid pixels (nonzero = valid, SNAPHU
+    # convention). Same dimensions as the interferogram.
+    mask: str(required=False)
+    # Re-level 2*pi offsets between regions the valid mask splits apart (e.g.
+    # land separated by a low-coherence river). whirlwind's own post-pass; the
+    # generic isce3 `bridge` step is skipped when algorithm is whirlwind.
+    bridge: bool(required=False)
+    # Coarse-solve factor for noisy scenes (>1 unwraps a coherently-averaged
+    # copy to pick each block's 2*pi cycle). Leave 1 for clean scenes.
+    downsample: int(min=1, required=False)
+    # Conservativeness of the connected-component labeling, in inverse-variance
+    # (1/sigma^2) units. 0 is the calibration-free SNAPHU wiggle test; raise to
+    # label fewer low-coherence pixels.
+    conncomp_reliability: num(min=0, required=False)
+    # Goldstein adaptive-filter strength in [0, 1] applied before the MCF (the
+    # integer cycle field is transferred back to the original phase). 0 = off.
+    goldstein_alpha: num(min=0, max=1, required=False)
 
 preprocess_wrapped_phase_options:
     enabled: bool(required=False)
