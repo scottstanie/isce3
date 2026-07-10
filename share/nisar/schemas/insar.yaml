@@ -239,8 +239,8 @@ snaphu_options:
     regrow_conncomps: bool(required=False)
 
 whirlwind_options:
-    # Effective number of looks of the input coherence. If not specified it is
-    # estimated the same way as for snaphu (see snaphu_options.nlooks).
+    # Effective number of independent looks in the coherence estimate. If not
+    # specified, computed by get_effective_looks (as for snaphu).
     nlooks: num(min=1, required=False)
     # File path to a binary mask of valid pixels (nonzero = valid, SNAPHU
     # convention). Same dimensions as the interferogram.
@@ -252,10 +252,9 @@ whirlwind_options:
     # Coarse-solve factor for noisy scenes (>1 unwraps a coherently-averaged
     # copy to pick each block's 2*pi cycle). Leave 1 for clean scenes.
     downsample: int(min=1, required=False)
-    # Conservativeness of the connected-component labeling, in inverse-variance
-    # (1/sigma^2) units. 0 is the calibration-free SNAPHU wiggle test; raise to
-    # label fewer low-coherence pixels.
-    conncomp_reliability: num(min=0, required=False)
+    # Coherence below which the connected components label a pixel 0. "auto" is
+    # 0.32/sqrt(nlooks); a number sets a fixed cutoff; "off" disables it.
+    conncomp_min_coherence: any(num(min=0, max=1), str(), required=False)
     # Goldstein adaptive-filter strength in [0, 1] applied before the MCF (the
     # integer cycle field is transferred back to the original phase). 0 = off.
     goldstein_alpha: num(min=0, max=1, required=False)

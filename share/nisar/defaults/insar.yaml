@@ -811,8 +811,9 @@ runconfig:
                     #  enabled (since regrowing connected components would be redundant in that case).
                     regrow_conncomps: True
                 whirlwind:
-                    # Effective number of looks of the input coherence. If left
-                    # blank it is estimated the same way as snaphu's nlooks.
+                    # Effective number of independent looks in the coherence
+                    # estimate. If blank, computed by get_effective_looks from the
+                    # range/azimuth spacing and bandwidth (as the snaphu branch does).
                     nlooks:
                     # File path to a binary valid-pixel mask (nonzero = valid).
                     mask:
@@ -822,9 +823,9 @@ runconfig:
                     bridge: True
                     # Coarse-solve factor for noisy scenes (1 = off).
                     downsample: 1
-                    # Connected-component conservativeness (1/sigma^2 units).
-                    # 0 = calibration-free SNAPHU wiggle test.
-                    conncomp_reliability: 0.0
+                    # Coherence below which conncomp labels a pixel 0. "auto" is
+                    # 0.32/sqrt(nlooks); a number sets a fixed cutoff.
+                    conncomp_min_coherence: auto
                     # Goldstein adaptive-filter strength in [0, 1] (0 = off).
                     goldstein_alpha: 0.0
                 bridge:

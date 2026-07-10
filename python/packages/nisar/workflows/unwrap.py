@@ -337,7 +337,8 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                             and mask is not None):
                         valid = ~mask if valid is None else (valid & ~mask)
 
-                    # Effective number of looks (same estimate as snaphu).
+                    # Effective number of independent looks in the coherence
+                    # estimate; computed by get_effective_looks (as for snaphu).
                     if ww_cfg.get("nlooks") is not None:
                         nlooks = ww_cfg["nlooks"]
                     else:
@@ -355,7 +356,7 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                         valid,
                         bridge=ww_cfg.get("bridge", True),
                         downsample=ww_cfg.get("downsample", 1),
-                        conncomp_reliability=ww_cfg.get("conncomp_reliability", 0.0),
+                        conncomp_min_coherence=ww_cfg.get("conncomp_min_coherence", "auto"),
                         goldstein_alpha=ww_cfg.get("goldstein_alpha", 0.0),
                     )
                     dst_h5[unw_path][:, :] = unw_array
