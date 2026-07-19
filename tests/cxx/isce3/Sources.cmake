@@ -6,6 +6,7 @@ core/attitude/quaternion_euler.cpp
 core/attitude/attitude.cpp
 core/attitude/representations.cpp
 core/datetime/datetime.cpp
+core/double-float.cpp
 core/ellipsoid/ellipsoid.cpp
 core/interp1d.cpp
 core/interpolator/interpolator.cpp

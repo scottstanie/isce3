@@ -25,6 +25,7 @@ core/Common.h
 core/Constants.h
 core/DateTime.h
 core/DenseMatrix.h
+core/DoubleFloat.h
 core/detail/BuildOrbit.h
 core/detail/InterpolateOrbit.h
 core/detail/InterpolateOrbit.icc
