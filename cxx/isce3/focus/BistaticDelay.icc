@@ -16,4 +16,32 @@ double bistaticDelay(const isce3::core::Vec3 & p,
     return 2. * (r.dot(v) - c * r.norm()) / (v.squaredNorm() - (c * c));
 }
 
+CUDA_HOSTDEV
+inline
+isce3::core::DoubleFloat bistaticDelayScale(const isce3::core::Vec3 & v)
+{
+    constexpr static double c = isce3::core::speed_of_light;
+    return isce3::core::DoubleFloat(2. / (v.squaredNorm() - c * c));
+}
+
+CUDA_HOSTDEV
+inline
+isce3::core::DoubleFloat bistaticDelay(const DoubleFloatVec3 & p,
+                                       const DoubleFloatVec3 & v,
+                                       const DoubleFloatVec3 & x,
+                                       const isce3::core::DoubleFloat w)
+{
+    using isce3::core::DoubleFloat;
+
+    // the speed of light splits exactly into hi + lo floats
+    constexpr DoubleFloat c(isce3::core::speed_of_light);
+
+    const DoubleFloat rx = x.x - p.x;
+    const DoubleFloat ry = x.y - p.y;
+    const DoubleFloat rz = x.z - p.z;
+    const DoubleFloat rv = rx * v.x + ry * v.y + rz * v.z;
+    const DoubleFloat rr = rx * rx + ry * ry + rz * rz;
+    return (rv - c * sqrt(rr)) * w;
+}
+
 }}

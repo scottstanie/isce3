@@ -62,6 +62,68 @@ inline std::complex<float> sumCoherent(const std::complex<float>* data,
     return std::complex<float>(sum);
 }
 
+/**
+ * \internal
+ * Double-float (df64) variant of sumCoherent.
+ *
+ * The delay & carrier phase chain uses only float32 operations (see
+ * isce3::core::DoubleFloat), matching the arithmetic available at full rate
+ * on GPUs with poor float64 throughput. The platform state must be pre-split
+ * into double-float form (pos/vel) along with the per-pulse delay scale
+ * factor w = 2 / (|v|^2 - c^2).
+ */
+inline std::complex<float> sumCoherentDf(const std::complex<float>* data,
+                                         const Linspace<double>& sampling_window,
+                                         const std::vector<DoubleFloatVec3>& pos,
+                                         const std::vector<DoubleFloatVec3>& vel,
+                                         const std::vector<DoubleFloat>& w,
+                                         const Vec3& x,
+                                         double fc,
+                                         double tau_atm,
+                                         const Kernel<float>& kernel,
+                                         int kstart, int kstop)
+{
+    // per-target float64 -> double-float splits, outside the pulse loop
+    const DoubleFloatVec3 x_df(x);
+    const DoubleFloat tau_atm_df(tau_atm);
+    const DoubleFloat fc_df(fc);
+    const DoubleFloat tau0_df(sampling_window.first());
+    const auto dtau_inv = static_cast<float>(1. / sampling_window.spacing());
+
+    constexpr float twopi = static_cast<float>(2. * M_PI);
+
+    // Kahan-compensated float32 accumulator
+    std::complex<float> sum(0.f, 0.f);
+    std::complex<float> comp(0.f, 0.f);
+
+    for (int k = kstart; k < kstop; ++k) {
+
+        // compute round-trip delay to target
+        const DoubleFloat tau =
+                tau_atm_df + bistaticDelay(pos[k], vel[k], x_df, w[k]);
+
+        // interpolate range-compressed data
+        auto data_line = &data[size_t(k) * sampling_window.size()];
+        const float u = (tau - tau0_df).hi * dtau_inv;
+        std::complex<float> s = interp1d(kernel, data_line,
+                sampling_window.size(), 1, static_cast<double>(u));
+
+        // apply phase migration compensation; the carrier phase is computed
+        // in cycles and wrapped exactly before conversion to radians, so
+        // float32 sin/cos see a small argument
+        const float phi = twopi * roundedRemainder(fc_df * tau);
+        s *= std::complex<float>(std::cos(phi), std::sin(phi));
+
+        // Kahan summation
+        const std::complex<float> y = s - comp;
+        const std::complex<float> t = sum + y;
+        comp = (t - sum) - y;
+        sum = t;
+    }
+
+    return sum;
+}
+
 ErrorCode
 backproject(std::complex<float>* out, const RadarGeometry& out_geometry,
         const std::complex<float>* in, const RadarGeometry& in_geometry,
@@ -69,7 +131,7 @@ backproject(std::complex<float>* out, const RadarGeometry& out_geometry,
         const Kernel<float>& kernel, DryTroposphereModel dry_tropo_model,
         const isce3::geometry::detail::Rdr2GeoBracketParams& r2g_params,
         const isce3::geometry::detail::Geo2RdrBracketParams& g2r_params,
-        float* height)
+        float* height, PhaseArithmetic phase_arithmetic)
 {
     static constexpr double c = isce3::core::speed_of_light;
     static constexpr auto nan = std::numeric_limits<float>::quiet_NaN();
@@ -79,6 +141,13 @@ backproject(std::complex<float>* out, const RadarGeometry& out_geometry,
             dry_tropo_model == DryTroposphereModel::TSX)) {
 
         std::string errmsg = "unexpected dry troposphere model";
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), errmsg);
+    }
+
+    if (not(phase_arithmetic == PhaseArithmetic::Double or
+            phase_arithmetic == PhaseArithmetic::DoubleFloat)) {
+
+        std::string errmsg = "unexpected phase arithmetic";
         throw isce3::except::InvalidArgument(ISCE_SRCINFO(), errmsg);
     }
 
@@ -103,6 +172,22 @@ backproject(std::complex<float>* out, const RadarGeometry& out_geometry,
     for (int i = 0; i < in_azimuth_time.size(); ++i) {
         double t = in_azimuth_time[i];
         in_geometry.orbit().interpolate(&pos[i], &vel[i], t);
+    }
+
+    // pre-split platform state into double-float form for the df64 path,
+    // along with the per-pulse delay scale factor - this is the only float64
+    // work amortized over the integration loop
+    std::vector<DoubleFloatVec3> pos_df, vel_df;
+    std::vector<DoubleFloat> w_df;
+    if (phase_arithmetic == PhaseArithmetic::DoubleFloat) {
+        pos_df.reserve(pos.size());
+        vel_df.reserve(vel.size());
+        w_df.reserve(vel.size());
+        for (size_t i = 0; i < pos.size(); ++i) {
+            pos_df.emplace_back(pos[i]);
+            vel_df.emplace_back(vel[i]);
+            w_df.push_back(bistaticDelayScale(vel[i]));
+        }
     }
 
     // range sampling window
@@ -199,9 +284,16 @@ backproject(std::complex<float>* out, const RadarGeometry& out_geometry,
             }
 
             // integrate pulses
-            out[j * out_geometry.gridWidth() + i] =
-                    sumCoherent(in, sampling_window, pos, vel, x, fc, tau_atm,
-                                kernel, kstart, kstop);
+            if (phase_arithmetic == PhaseArithmetic::Double) {
+                out[j * out_geometry.gridWidth() + i] =
+                        sumCoherent(in, sampling_window, pos, vel, x, fc,
+                                    tau_atm, kernel, kstart, kstop);
+            } else {
+                out[j * out_geometry.gridWidth() + i] =
+                        sumCoherentDf(in, sampling_window, pos_df, vel_df,
+                                      w_df, x, fc, tau_atm, kernel, kstart,
+                                      kstop);
+            }
         }
     }
 

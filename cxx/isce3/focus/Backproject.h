@@ -16,6 +16,24 @@ namespace isce3 {
 namespace focus {
 
 /**
+ * Floating-point arithmetic used for the delay & carrier phase computation
+ * in the backprojection integration loop
+ */
+enum class PhaseArithmetic {
+    /** IEEE double precision (the reference implementation) */
+    Double,
+
+    /**
+     * Double-float ("df64") arithmetic built from float32 operations only
+     * (see isce3::core::DoubleFloat). Carrier phase error is on the order
+     * of a microradian. Intended for GPUs whose float64 throughput is a
+     * small fraction of float32; on CPUs it is typically not faster than
+     * Double.
+     */
+    DoubleFloat,
+};
+
+/**
  * Focus in azimuth via time-domain backprojection
  *
  * \param[out] out             Output focused signal data
@@ -30,6 +48,8 @@ namespace focus {
  * \param[in]  r2g_params      rdr2geo configuration parameters
  * \param[in]  g2r_params      geo2rdr configuration parameters
  * \param[out] height          Height of each pixel in meters above ellipsoid
+ * \param[in]  phase_arithmetic Arithmetic used for the delay & carrier phase
+ *                              computation in the integration loop
  *
  * \returns Non-zero error code if geometry fails to converge for any pixel,
  *          and the values for these pixels are set to NaN.
@@ -44,7 +64,8 @@ backproject(std::complex<float>* out,
         DryTroposphereModel dry_tropo_model = DryTroposphereModel::TSX,
         const isce3::geometry::detail::Rdr2GeoBracketParams& r2g_params = {},
         const isce3::geometry::detail::Geo2RdrBracketParams& g2r_params = {},
-        float* height = nullptr);
+        float* height = nullptr,
+        PhaseArithmetic phase_arithmetic = PhaseArithmetic::Double);
 
 } // namespace focus
 } // namespace isce3
