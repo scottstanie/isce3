@@ -33,7 +33,10 @@ using namespace isce3::cuda::geometry;
 using isce3::cuda::core::interp1d;
 using isce3::error::ErrorCode;
 using isce3::focus::bistaticDelay;
+using isce3::focus::bistaticDelayScale;
+using isce3::focus::DoubleFloatVec3;
 using isce3::focus::dryTropoDelayTSX;
+using isce3::focus::PhaseArithmetic;
 
 using HostDEMInterpolator = isce3::geometry::DEMInterpolator;
 using HostRadarGeometry = isce3::container::RadarGeometry;
@@ -463,6 +466,136 @@ __global__ void sumCoherentBatch(
     out[tid] += thrust::complex<float>(batch_sum);
 }
 
+/**
+ * \internal
+ * Split double-precision platform state into double-float form, along with
+ * the per-pulse bistatic delay scale factor 2 / (|v|^2 - c^2).
+ *
+ * This is the only float64 work amortized over the integration loop of the
+ * double-float backprojection path.
+ *
+ * \param[out] pos_df Platform position at each pulse, double-float (m)
+ * \param[out] vel_df Platform velocity at each pulse, double-float (m/s)
+ * \param[out] w      Delay scale factor at each pulse (s^2/m^2)
+ * \param[in]  pos    Platform position at each pulse (m)
+ * \param[in]  vel    Platform velocity at each pulse (m/s)
+ * \param[in]  n      Number of pulses
+ */
+__global__ void splitPlatformState(DoubleFloatVec3* pos_df,
+                                   DoubleFloatVec3* vel_df, DoubleFloat* w,
+                                   const Vec3* pos, const Vec3* vel,
+                                   const size_t n)
+{
+    // thread index (1d grid of 1d blocks)
+    const auto tid = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+
+    // bounds check
+    if (tid >= n) {
+        return;
+    }
+
+    pos_df[tid] = DoubleFloatVec3(pos[tid]);
+    vel_df[tid] = DoubleFloatVec3(vel[tid]);
+    w[tid] = bistaticDelayScale(vel[tid]);
+}
+
+/**
+ * \internal
+ * Double-float (df64) variant of sumCoherentBatch.
+ *
+ * The delay & carrier phase chain uses only float32 operations (see
+ * isce3::core::DoubleFloat), so the integration loop avoids the native
+ * float64 pipeline entirely - on GPUs with 1/32 to 1/64 rate float64 this
+ * is the difference between compute-bound and memory-bound. The platform
+ * state must be pre-split with splitPlatformState. Carrier phase error is
+ * on the order of a microradian.
+ *
+ * Parameters are as in sumCoherentBatch, with the platform state replaced
+ * by its double-float form plus the per-pulse delay scale factor \p w.
+ */
+template<class Kernel>
+__global__ void sumCoherentBatchDf(
+        thrust::complex<float>* out, const thrust::complex<float>* rc,
+        const DoubleFloatVec3* __restrict__ pos,
+        const DoubleFloatVec3* __restrict__ vel,
+        const DoubleFloat* __restrict__ w,
+        const Linspace<double> sampling_window, const Vec3* __restrict__ x_in,
+        const double* __restrict__ tau_atm_in,
+        const int* __restrict__ kstart_in, const int* __restrict__ kstop_in,
+        const size_t n, const double fc, const Kernel kernel,
+        const int batch_start, const int batch_stop)
+{
+    // thread index (1d grid of 1d blocks)
+    const auto tid = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+
+    // bounds check
+    if (tid >= n) {
+        return;
+    }
+
+    // cache some inputs
+    const Vec3 x = x_in[tid];
+    const int kstart = kstart_in[tid];
+    const int kstop = kstop_in[tid];
+
+    // set bad data to NaN
+    if (std::isnan(x[0])) {
+        const auto nan = std::nanf("geometry");
+        out[tid] = thrust::complex<float>(nan, nan);
+        return;
+    }
+
+    // per-target float64 -> double-float splits, outside the pulse loop
+    const DoubleFloatVec3 x_df(x);
+    const DoubleFloat tau_atm_df(tau_atm_in[tid]);
+    const DoubleFloat fc_df(fc);
+    const DoubleFloat tau0_df(sampling_window.first());
+    const auto dtau_inv = static_cast<float>(1. / sampling_window.spacing());
+    const auto samples = static_cast<size_t>(sampling_window.size());
+
+    constexpr float twopi = static_cast<float>(2. * M_PI);
+
+    // Kahan-compensated float32 accumulator
+    thrust::complex<float> sum(0.f, 0.f);
+    thrust::complex<float> comp(0.f, 0.f);
+
+    // loop over lines in batch
+    for (int k = batch_start; k < batch_stop; ++k) {
+
+        // check if pulse is within CPI bounds
+        if (k < kstart or k >= kstop) {
+            continue;
+        }
+
+        // compute round-trip delay to target
+        const DoubleFloat tau =
+                tau_atm_df + bistaticDelay(pos[k], vel[k], x_df, w[k]);
+
+        // interpolate range-compressed data
+        const auto* rc_line = &rc[(k - batch_start) * samples];
+        const float u = (tau - tau0_df).hi * dtau_inv;
+        thrust::complex<float> z = interp1d(kernel, rc_line, samples, 1,
+                static_cast<double>(u));
+
+        // apply phase migration compensation; the carrier phase is computed
+        // in cycles and wrapped exactly before conversion to radians, so
+        // float32 sin/cos see a small argument
+        const float phi = twopi * roundedRemainder(fc_df * tau);
+        float sin_phi, cos_phi;
+        ::sincosf(phi, &sin_phi, &cos_phi);
+        z *= thrust::complex<float>(cos_phi, sin_phi);
+
+        // Kahan summation
+        const thrust::complex<float> y = z - comp;
+        const thrust::complex<float> t = sum + y;
+        comp = (t - sum) - y;
+        sum = t;
+    }
+
+    // add batch sum to total
+    out[tid] += sum;
+}
+
 } // namespace
 
 template<class Kernel>
@@ -474,13 +607,19 @@ ErrorCode backproject(std::complex<float>* out,
                       const Kernel& kernel, DryTroposphereModel dry_tropo_model,
                       const Rdr2GeoBracketParams& rdr2geo_params,
                       const Geo2RdrBracketParams& geo2rdr_params, int batch,
-                      float* height)
+                      float* height, PhaseArithmetic phase_arithmetic)
 {
     // XXX input reference epoch must match output reference epoch
     if (out_geometry.referenceEpoch() != in_geometry.referenceEpoch()) {
         std::string errmsg = "input reference epoch must match output "
                              "reference epoch";
         throw isce3::except::RuntimeError(ISCE_SRCINFO(), errmsg);
+    }
+
+    if (not(phase_arithmetic == PhaseArithmetic::Double or
+            phase_arithmetic == PhaseArithmetic::DoubleFloat)) {
+        std::string errmsg = "unexpected phase arithmetic";
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), errmsg);
     }
 
     // init device variable to return error codes from device code
@@ -504,6 +643,28 @@ ErrorCode backproject(std::complex<float>* out,
         interpolateOrbit<<<grid, block>>>(pos.data().get(), vel.data().get(),
                                           in_geometry.orbit(), in_azimuth_time,
                                           errc.data().get());
+
+        checkCudaErrors(cudaPeekAtLastError());
+        checkCudaErrors(cudaStreamSynchronize(cudaStreamDefault));
+    }
+
+    // pre-split platform state into double-float form for the df64 path
+    thrust::device_vector<DoubleFloatVec3> pos_df;
+    thrust::device_vector<DoubleFloatVec3> vel_df;
+    thrust::device_vector<DoubleFloat> w_df;
+
+    if (phase_arithmetic == PhaseArithmetic::DoubleFloat) {
+        pos_df.resize(in_lines);
+        vel_df.resize(in_lines);
+        w_df.resize(in_lines);
+
+        const unsigned block = 256;
+        const unsigned grid = (in_lines + block - 1) / block;
+
+        splitPlatformState<<<grid, block>>>(
+                pos_df.data().get(), vel_df.data().get(), w_df.data().get(),
+                pos.data().get(), vel.data().get(),
+                static_cast<size_t>(in_lines));
 
         checkCudaErrors(cudaPeekAtLastError());
         checkCudaErrors(cudaStreamSynchronize(cudaStreamDefault));
@@ -677,11 +838,21 @@ ErrorCode backproject(std::complex<float>* out,
 
         using KV = typename Kernel::view_type;
 
-        sumCoherentBatch<KV><<<grid, block>>>(
-                img.data().get(), rc.data().get(), pos.data().get(),
-                vel.data().get(), sampling_window, x.data().get(),
-                tau_atm.data().get(), kstart.data().get(), kstop.data().get(),
-                out_grid_size, fc, kernel, k, k + curr_batch);
+        if (phase_arithmetic == PhaseArithmetic::Double) {
+            sumCoherentBatch<KV><<<grid, block>>>(
+                    img.data().get(), rc.data().get(), pos.data().get(),
+                    vel.data().get(), sampling_window, x.data().get(),
+                    tau_atm.data().get(), kstart.data().get(),
+                    kstop.data().get(), out_grid_size, fc, kernel, k,
+                    k + curr_batch);
+        } else {
+            sumCoherentBatchDf<KV><<<grid, block>>>(
+                    img.data().get(), rc.data().get(), pos_df.data().get(),
+                    vel_df.data().get(), w_df.data().get(), sampling_window,
+                    x.data().get(), tau_atm.data().get(), kstart.data().get(),
+                    kstop.data().get(), out_grid_size, fc, kernel, k,
+                    k + curr_batch);
+        }
 
         checkCudaErrors(cudaPeekAtLastError());
         checkCudaErrors(cudaStreamSynchronize(cudaStreamDefault));
@@ -704,7 +875,7 @@ ErrorCode backproject(std::complex<float>* out,
                       DryTroposphereModel dry_tropo_model,
                       const Rdr2GeoBracketParams& rdr2geo_params,
                       const Geo2RdrBracketParams& geo2rdr_params, int batch,
-                      float* height)
+                      float* height, PhaseArithmetic phase_arithmetic)
 {
     // copy inputs to device
     const DeviceRadarGeometry d_out_geometry(out_geometry);
@@ -717,35 +888,35 @@ ErrorCode backproject(std::complex<float>* out,
                 dynamic_cast<const HostBartlettKernel<float>&>(kernel));
         ec = backproject(out, d_out_geometry, in, d_in_geometry, d_dem, fc, ds,
                          d_kernel, dry_tropo_model, rdr2geo_params,
-                         geo2rdr_params, batch, height);
+                         geo2rdr_params, batch, height, phase_arithmetic);
     }
     else if (typeid(kernel) == typeid(HostLinearKernel<float>)) {
         const DeviceLinearKernel<float> d_kernel(
                 dynamic_cast<const HostLinearKernel<float>&>(kernel));
         ec = backproject(out, d_out_geometry, in, d_in_geometry, d_dem, fc, ds,
                          d_kernel, dry_tropo_model, rdr2geo_params,
-                         geo2rdr_params, batch, height);
+                         geo2rdr_params, batch, height, phase_arithmetic);
     }
     else if (typeid(kernel) == typeid(HostKnabKernel<float>)) {
         const DeviceKnabKernel<float> d_kernel(
                 dynamic_cast<const HostKnabKernel<float>&>(kernel));
         ec = backproject(out, d_out_geometry, in, d_in_geometry, d_dem, fc, ds,
                          d_kernel, dry_tropo_model, rdr2geo_params,
-                         geo2rdr_params, batch, height);
+                         geo2rdr_params, batch, height, phase_arithmetic);
     }
     else if (typeid(kernel) == typeid(HostTabulatedKernel<float>)) {
         const DeviceTabulatedKernel<float> d_kernel(
                 dynamic_cast<const HostTabulatedKernel<float>&>(kernel));
         ec = backproject(out, d_out_geometry, in, d_in_geometry, d_dem, fc, ds,
                          d_kernel, dry_tropo_model, rdr2geo_params,
-                         geo2rdr_params, batch, height);
+                         geo2rdr_params, batch, height, phase_arithmetic);
     }
     else if (typeid(kernel) == typeid(HostChebyKernel<float>)) {
         const DeviceChebyKernel<float> d_kernel(
                 dynamic_cast<const HostChebyKernel<float>&>(kernel));
         ec = backproject(out, d_out_geometry, in, d_in_geometry, d_dem, fc, ds,
                          d_kernel, dry_tropo_model, rdr2geo_params,
-                         geo2rdr_params, batch, height);
+                         geo2rdr_params, batch, height, phase_arithmetic);
     }
     else {
         throw isce3::except::RuntimeError(ISCE_SRCINFO(), "not implemented");

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <string>
+
 #include <pybind11/pybind11.h>
+#include <isce3/focus/Backproject.h>
 #include <isce3/geometry/detail/Rdr2Geo.h>
 #include <isce3/geometry/detail/Geo2Rdr.h>
 
@@ -11,3 +14,6 @@ parse_rdr2geo_params(const pybind11::dict& params);
 
 isce3::geometry::detail::Geo2RdrBracketParams
 parse_geo2rdr_params(const pybind11::dict& params);
+
+isce3::focus::PhaseArithmetic
+parsePhaseArithmetic(const std::string& s);

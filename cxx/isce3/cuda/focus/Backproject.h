@@ -17,6 +17,7 @@
 namespace isce3 { namespace cuda { namespace focus {
 
 using isce3::focus::DryTroposphereModel;
+using isce3::focus::PhaseArithmetic;
 using isce3::geometry::detail::Geo2RdrBracketParams;
 using isce3::geometry::detail::Rdr2GeoBracketParams;
 
@@ -36,6 +37,8 @@ using isce3::geometry::detail::Rdr2GeoBracketParams;
  * \param[in]  geo2rdr_params  geo2rdr configuration parameters
  * \param[in]  batch           Number of range-compressed data lines per batch
  * \param[out] height          Height of each pixel in meters above ellipsoid
+ * \param[in]  phase_arithmetic Arithmetic used for the delay & carrier phase
+ *                              computation in the integration loop
  *
  * \returns Non-zero error code if geometry fails to converge for any pixel,
  *          and the values for these pixels are set to NaN.
@@ -53,7 +56,8 @@ backproject(std::complex<float>* out,
             DryTroposphereModel dry_tropo_model = DryTroposphereModel::TSX,
             const Rdr2GeoBracketParams& rdr2geo_params = {},
             const Geo2RdrBracketParams& geo2rdr_params = {},
-            int batch = 1024, float* height = nullptr);
+            int batch = 1024, float* height = nullptr,
+            PhaseArithmetic phase_arithmetic = PhaseArithmetic::Double);
 
 /**
  * Focus in azimuth via time-domain backprojection
@@ -71,6 +75,8 @@ backproject(std::complex<float>* out,
  * \param[in]  geo2rdr_params  geo2rdr configuration parameters
  * \param[in]  batch           Number of range-compressed data lines per batch
  * \param[out] height          Height of each pixel in meters above ellipsoid
+ * \param[in]  phase_arithmetic Arithmetic used for the delay & carrier phase
+ *                              computation in the integration loop
  *
  * \returns Non-zero error code if geometry fails to converge for any pixel,
  *          and the values for these pixels are set to NaN.
@@ -85,6 +91,7 @@ backproject(std::complex<float>* out,
             DryTroposphereModel dry_tropo_model = DryTroposphereModel::TSX,
             const Rdr2GeoBracketParams& rdr2geo_params = {},
             const Geo2RdrBracketParams& geo2rdr_params = {},
-            int batch = 1024, float* height = nullptr);
+            int batch = 1024, float* height = nullptr,
+            PhaseArithmetic phase_arithmetic = PhaseArithmetic::Double);
 
 }}} // namespace isce3::cuda::focus

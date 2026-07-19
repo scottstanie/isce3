@@ -37,7 +37,8 @@ void addbinding_cuda_backproject(py::module& m)
                 py::dict rdr2geo_params,
                 py::dict geo2rdr_params,
                 int batch,
-                std::optional<py::array_t<float, py::array::c_style>> height) {
+                std::optional<py::array_t<float, py::array::c_style>> height,
+                const std::string& phase_arithmetic) {
 
             if (out.ndim() != 2) {
                 throw InvalidArgument(ISCE_SRCINFO(), "output array must be 2-D");
@@ -84,6 +85,8 @@ void addbinding_cuda_backproject(py::module& m)
             const auto r2gparams = parse_rdr2geo_params(rdr2geo_params);
             const auto g2rparams = parse_geo2rdr_params(geo2rdr_params);
 
+            const auto arithmetic = parsePhaseArithmetic(phase_arithmetic);
+
             if (batch < 1) {
                 throw DomainError(ISCE_SRCINFO(), "batch size must be > 0");
             }
@@ -93,13 +96,21 @@ void addbinding_cuda_backproject(py::module& m)
                 py::gil_scoped_release release;
                 err = backproject(out_data, out_geometry, in_data, in_geometry,
                         dem, fc, ds, kernel, atm, r2gparams, g2rparams, batch,
-                        height_data);
+                        height_data, arithmetic);
             }
             // TODO bind ErrorCode class.  For now return nonzero on failure.
             return err != ErrorCode::Success;
             },
             R"(
                 Focus in azimuth via time-domain backprojection.
+
+                The phase_arithmetic argument selects the floating-point
+                arithmetic used for the delay & carrier phase computation in
+                the integration loop: "double" (the reference implementation)
+                or "double_float" (df64 arithmetic built from float32
+                operations only, intended for GPUs with poor float64
+                throughput; carrier phase error is on the order of a
+                microradian).
             )",
             py::arg("out"),
             py::arg("out_geometry"),
@@ -113,5 +124,6 @@ void addbinding_cuda_backproject(py::module& m)
             py::arg("rdr2geo_params") = py::dict(),
             py::arg("geo2rdr_params") = py::dict(),
             py::arg("batch") = 1024,
-            py::arg("height") = py::none());
+            py::arg("height") = py::none(),
+            py::arg("phase_arithmetic") = "double");
 }
