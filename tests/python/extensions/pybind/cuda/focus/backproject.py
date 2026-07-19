@@ -8,7 +8,7 @@ from iscetest import data as test_data_dir
 from pathlib import Path
 import json
 
-from ...focus.backproject import load_h5
+from ...focus.backproject import focus_point_target, load_h5
 from isce3.cal.point_target_info import analyze_point_target, tofloatvals
 
 c = isce.core.speed_of_light
@@ -111,3 +111,30 @@ def test_backproject():
     # threshold is slightly higher - see
     # https://github.jpl.nasa.gov/bhawkins/nisar-notebooks/blob/master/Azimuth%20Resolution.ipynb
     assert(azimuth_width <= 6.62)
+
+
+def test_backproject_double_float():
+    # Same comparison as the CPU test of the same name, but through the CUDA
+    # kernels: the double-float (df64) integration loop runs the delay &
+    # carrier phase chain on float32 operations only and must match the
+    # double-precision kernel far below any interferometric requirement.
+    filename = Path(test_data_dir) / "point-target-sim-rc.h5"
+    d = load_h5(filename)
+
+    cuda_backproject = isce.cuda.focus.backproject
+    out_f64, height_f64, _ = focus_point_target(
+            d, backproject=cuda_backproject)
+    out_df64, height_df64, _ = focus_point_target(
+            d, phase_arithmetic="double_float", backproject=cuda_backproject)
+
+    # the geometry path is identical in both modes
+    npt.assert_array_equal(height_f64, height_df64)
+
+    # complex agreement over the whole chip, relative to the focused peak
+    peak = np.abs(out_f64).max()
+    assert np.abs(out_df64 - out_f64).max() < 1e-4 * peak
+
+    # phase agreement at the focused peak
+    ipk = np.unravel_index(np.argmax(np.abs(out_f64)), out_f64.shape)
+    dphi = np.angle(out_df64[ipk] * np.conj(out_f64[ipk]))
+    assert np.abs(dphi) < 1e-4

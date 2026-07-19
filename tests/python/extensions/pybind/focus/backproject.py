@@ -80,12 +80,14 @@ azimuth_res = 6.
 nchip = 129
 
 
-def focus_point_target(d, phase_arithmetic="double"):
+def focus_point_target(d, phase_arithmetic="double",
+                       backproject=isce.focus.backproject):
     """
     Focus the simulated point target to a chip centered on the target.
 
     Returns the complex chip, the debug height layer, and the output radar
-    geometry.
+    geometry. Pass backproject=isce3.cuda.focus.backproject to run the CUDA
+    implementation.
     """
     radar_grid = d["radar_grid"]
     orbit = d["orbit"]
@@ -115,7 +117,7 @@ def focus_point_target(d, phase_arithmetic="double"):
     out_geometry = isce.container.RadarGeometry(out_grid, orbit, doppler)
 
     # focus to output grid
-    err = isce.focus.backproject(out, out_geometry, d["signal_data"],
+    err = backproject(out, out_geometry, d["signal_data"],
             in_geometry, d["dem"], d["center_frequency"], azimuth_res, kernel,
             d["dry_tropo_model"], height=height,
             phase_arithmetic=phase_arithmetic)
