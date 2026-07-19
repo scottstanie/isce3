@@ -2340,7 +2340,8 @@ def focus(runconfig, runconfig_path=""):
                 err = backproject(z, ogeom, rcfile.data, igeom, dem,
                             channel_out.band.center, azres,
                             kernel, atmos, get_rdr2geo_params(cfg),
-                            get_geo2rdr_params(cfg, orbit), height=hgt)
+                            get_geo2rdr_params(cfg, orbit), height=hgt,
+                            phase_arithmetic=cfg.processing.azcomp.phase_arithmetic)
                 if err:
                     log.warning("azcomp block contains some invalid pixels")
                 writer.queue_write(z, block)

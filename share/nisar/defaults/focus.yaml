@@ -432,6 +432,17 @@ runconfig:
                     range: 32768
                     azimuth: 1024
 
+                # Floating-point arithmetic for the delay & carrier phase
+                # computation in the backprojection integration loop.
+                # Valid choices are
+                # - double: IEEE double precision (the reference
+                #   implementation; requires good float64 GPU throughput)
+                # - double_float: df64 arithmetic built from float32
+                #   operations only, intended for GPUs with poor float64
+                #   throughput. Carrier phase error is on the order of a
+                #   microradian.
+                phase_arithmetic: double
+
                 # Desired azimuth resolution in meters.
                 azimuth_resolution: 6.0
 

@@ -205,6 +205,10 @@ runconfig:
           range: int(min=0, required=False)
           azimuth: int(min=1, required=False)
 
+        # Floating-point arithmetic for the delay & carrier phase computation
+        # in the backprojection integration loop.
+        phase_arithmetic: enum('double', 'double_float', required=False)
+
         # Desired azimuth resolution in meters.
         azimuth_resolution: num(min=0.0, required=False)
 
