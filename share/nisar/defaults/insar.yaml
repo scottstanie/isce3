@@ -856,37 +856,17 @@ runconfig:
                     interp_min_radius: 0
                     # Gaussian distance-weighting falloff for the neighbor average.
                     interp_alpha: 0.75
-                    # Connected component grow algorithm: "snaphu" (SNAPHU-faithful ambiguity-wiggle
-                    # on unwrapped output, tuned by conncomp_reliability) or "linear" (global
-                    # coherence-cost grow, tuned by cost_threshold/conncomp_sigma/conncomp_cycle_prob).
-                    conncomp_algorithm: snaphu
-                    # Coherence below which pixels are labeled 0 (background) in default ("snaphu")
-                    # connected components. "auto" uses 0.32/sqrt(nlooks); pass float for fixed cutoff,
-                    # or None to disable cutoff and use conncomp_reliability instead. Takes precedence
-                    # over conncomp_reliability. Only used when conncomp_algorithm="snaphu".
+                    # Coherence below which pixels are labeled 0 (background) in the connected
+                    # components. "auto" uses 0.32/sqrt(nlooks); pass a float for a fixed cutoff,
+                    # or leave unset to disable the cutoff and use conncomp_reliability instead.
+                    # Takes precedence over conncomp_reliability.
                     conncomp_min_coherence: auto
-                    # Lower-level conservativeness knob for default ("snaphu") connected components,
-                    # in inverse-variance (1/sigma2) units, so values are small. Used only when
-                    # conncomp_min_coherence is None. 0 labels essentially every reliably unwrapped
-                    # pixel; raise to cut more low-coherence interior edges. Only used when
-                    # conncomp_algorithm="snaphu".
+                    # Lower-level conservativeness knob for the connected components, in
+                    # inverse-variance (1/sigma2) units, so values are small. Used only when
+                    # conncomp_min_coherence is unset. 0 labels essentially every reliably
+                    # unwrapped pixel; raise to cut more low-coherence interior edges.
                     conncomp_reliability: 0.0
-                    # Connected-component boundary threshold in raw cost units, for "linear" algorithm
-                    # only. Edge becomes boundary when statistical cost <= cost_threshold; larger value
-                    # makes more boundaries and smaller, safer components. No effect under default
-                    # "snaphu" algorithm.
-                    cost_threshold: 50
-                    # For conncomp_algorithm="linear": set cost_threshold from target per-edge
-                    # one-cycle-correction probability. Lower cycle_prob is stricter; about 2.4e-4
-                    # matches default. Takes precedence over cost_threshold, but conncomp_sigma wins
-                    # if both given.
-                    conncomp_cycle_prob:
-                    # For conncomp_algorithm="linear": set cost_threshold from Gaussian-equivalent
-                    # noise level. Edge is cut when one-cycle-correction probability exceeds
-                    # 0.5*erfc(sigma/sqrt(2)). Higher sigma is stricter; sigma of ~3.5 reproduces
-                    # default cost_threshold=50. Takes precedence over cost_threshold and conncomp_cycle_prob.
-                    conncomp_sigma:
-                    # Discard connected components smaller than this many pixels (both algorithms).
+                    # Discard connected components smaller than this many pixels.
                     min_size_px: 100
                     # Maximum number of connected components to keep (largest first).
                     max_ncomps: 1024
