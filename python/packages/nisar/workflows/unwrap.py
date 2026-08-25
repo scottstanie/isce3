@@ -350,7 +350,7 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                     # Get whirlwind parameters using helper function
                     ww_kwargs = set_whirlwind_attributes(whirlwind_cfg)
                     ww_kwargs['nlooks'] = float(nlooks)
-                    ww_kwargs['mask'] = mask_array if mask_array is not None else None
+                    ww_kwargs['mask'] = mask_array
 
                     # Run whirlwind unwrapping
                     unwrapped, conncomp = ww.unwrap(igram_array, coh_array, **ww_kwargs)
@@ -530,7 +530,32 @@ def set_phass_attributes(cfg: dict):
     return unwrap
 
 
-def set_whirlwind_attributes(cfg: dict):
+# Options forwarded verbatim from the `whirlwind` runconfig group to
+# `whirlwind.unwrap`. `nlooks` and `mask` are excluded because they need
+# conversion (looks estimation, raster read) and are set by the caller.
+WHIRLWIND_OPTIONS = (
+    'bridge',
+    'downsample',
+    'interpolate',
+    'interp_cutoff',
+    'interp_num_neighbors',
+    'interp_max_radius',
+    'interp_min_radius',
+    'interp_alpha',
+    'conncomp_algorithm',
+    'conncomp_min_coherence',
+    'conncomp_reliability',
+    'cost_threshold',
+    'conncomp_cycle_prob',
+    'conncomp_sigma',
+    'min_size_px',
+    'max_ncomps',
+    'goldstein_alpha',
+    'goldstein_psize',
+)
+
+
+def set_whirlwind_attributes(cfg: dict) -> dict:
     """
     Return dictionary with whirlwind parameters from user-defined config
 
@@ -543,48 +568,16 @@ def set_whirlwind_attributes(cfg: dict):
     -------
     ww_kwargs: dict
         Dictionary of whirlwind parameters for whirlwind.unwrap()
+
+    Notes
+    -----
+    Options left unset (None) in the runconfig are dropped rather than
+    forwarded, so `whirlwind.unwrap` applies its own default for each.
+    Indexing `cfg` directly is deliberate: a missing key means
+    WHIRLWIND_OPTIONS has drifted from the runconfig schema, which should
+    fail loudly rather than silently unwrap with a different setting.
     """
-    ww_kwargs = {}
-
-    # Add parameters if specified in config
-    if cfg.get('bridge') is not None:
-        ww_kwargs['bridge'] = cfg['bridge']
-    if cfg.get('downsample') is not None:
-        ww_kwargs['downsample'] = cfg['downsample']
-    if cfg.get('interpolate') is not None:
-        ww_kwargs['interpolate'] = cfg['interpolate']
-    if cfg.get('interp_cutoff') is not None:
-        ww_kwargs['interp_cutoff'] = cfg['interp_cutoff']
-    if cfg.get('interp_num_neighbors') is not None:
-        ww_kwargs['interp_num_neighbors'] = cfg['interp_num_neighbors']
-    if cfg.get('interp_max_radius') is not None:
-        ww_kwargs['interp_max_radius'] = cfg['interp_max_radius']
-    if cfg.get('interp_min_radius') is not None:
-        ww_kwargs['interp_min_radius'] = cfg['interp_min_radius']
-    if cfg.get('interp_alpha') is not None:
-        ww_kwargs['interp_alpha'] = cfg['interp_alpha']
-    if cfg.get('conncomp_algorithm') is not None:
-        ww_kwargs['conncomp_algorithm'] = cfg['conncomp_algorithm']
-    if cfg.get('conncomp_min_coherence') is not None:
-        ww_kwargs['conncomp_min_coherence'] = cfg['conncomp_min_coherence']
-    if cfg.get('conncomp_reliability') is not None:
-        ww_kwargs['conncomp_reliability'] = cfg['conncomp_reliability']
-    if cfg.get('cost_threshold') is not None:
-        ww_kwargs['cost_threshold'] = cfg['cost_threshold']
-    if cfg.get('conncomp_cycle_prob') is not None:
-        ww_kwargs['conncomp_cycle_prob'] = cfg['conncomp_cycle_prob']
-    if cfg.get('conncomp_sigma') is not None:
-        ww_kwargs['conncomp_sigma'] = cfg['conncomp_sigma']
-    if cfg.get('min_size_px') is not None:
-        ww_kwargs['min_size_px'] = cfg['min_size_px']
-    if cfg.get('max_ncomps') is not None:
-        ww_kwargs['max_ncomps'] = cfg['max_ncomps']
-    if cfg.get('goldstein_alpha') is not None:
-        ww_kwargs['goldstein_alpha'] = cfg['goldstein_alpha']
-    if cfg.get('goldstein_psize') is not None:
-        ww_kwargs['goldstein_psize'] = cfg['goldstein_psize']
-
-    return ww_kwargs
+    return {key: cfg[key] for key in WHIRLWIND_OPTIONS if cfg[key] is not None}
 
 
 def igram_phase_to_vrt(raster_path, output_path):
