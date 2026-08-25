@@ -667,10 +667,10 @@ number and creation date in <code>YYMMDD</code> format (e.g. <code>8.10.250801</
 <code>manifest.json</code> (or <code>list.manifest.json</code>) file associated with the image in the
 Artifactory repository. Alternatively, it can be found by pulling and inspecting the
 image locally. For example, if the image tag is <code>8.10.250801</code>,</p>
-<div class="highlight"><pre><span></span><code>$<span class="w"> </span><span class="nv">REPO</span><span class="o">=</span><span class="s1">&#39;cae-artifactory.jpl.nasa.gov:16003/gov/nasa/jpl/iems/sds/infrastructure/base/jplsds-oraclelinux&#39;</span>
-$<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span><span class="s1">&#39;8.10.250801&#39;</span>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span><span class="nv">REPO</span><span class="o">=</span><span class="s1">'cae-artifactory.jpl.nasa.gov:16003/gov/nasa/jpl/iems/sds/infrastructure/base/jplsds-oraclelinux'</span>
+$<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span><span class="s1">'8.10.250801'</span>
 $<span class="w"> </span>docker<span class="w"> </span>pull<span class="w"> </span><span class="nv">$REPO</span>:<span class="nv">$TAG</span>
-$<span class="w"> </span>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{index .RepoDigests 0}}&#39;</span><span class="w"> </span><span class="nv">$REPO</span>:<span class="nv">$TAG</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-oE<span class="w"> </span><span class="s1">&#39;sha256:[a-zA-Z0-9]+&#39;</span>
+$<span class="w"> </span>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">'{{index .RepoDigests 0}}'</span><span class="w"> </span><span class="nv">$REPO</span>:<span class="nv">$TAG</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-oE<span class="w"> </span><span class="s1">'sha256:[a-zA-Z0-9]+'</span>
 </code></pre></div>
 </li>
 <li>
