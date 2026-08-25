@@ -831,6 +831,9 @@ runconfig:
                     # disconnected pieces (e.g., land slabs separated by low-coherence river).
                     # Estimates each region's level from unwrapped phase at region boundaries
                     # and snaps to integer cycles, propagated along MST rooted at largest region.
+                    # This supersedes the sibling `bridge` group below: when this is True that
+                    # group is skipped, since re-leveling an already-bridged result can add a
+                    # spurious cycle slip. Set this False to use the `bridge` group instead.
                     bridge: True
                     # Coarse-solve factor for noisy scenes. When >1, the interferogram is
                     # coherently averaged into downsample x downsample blocks and unwrapped at

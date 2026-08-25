@@ -370,7 +370,16 @@ def run(cfg: dict, input_hdf5: str, output_hdf5: str):
                 # Clean up unwrapped phase raster
                 del unw_raster
 
-                if bridge_cfg['enabled']:
+                # whirlwind does its own mask-aware bridging, snapping each
+                # region to an exact integer cycle. Re-leveling that result with
+                # the generic post-process re-estimates offsets from `unw != 0`
+                # clusters and can introduce a spurious cycle slip, so run at
+                # most one of the two.
+                bridge_enabled = bridge_cfg['enabled']
+                if algorithm == "whirlwind" and unwrap_args["whirlwind"]["bridge"]:
+                    bridge_enabled = False
+
+                if bridge_enabled:
                     unwrapped_phase = dst_h5[unw_path][()]
                     if unwrap_args["preprocess_wrapped_phase"]["enabled"]:
                         if mask is not None:
