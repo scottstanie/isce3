@@ -844,8 +844,7 @@ runconfig:
                 whirlwind:
                     # Effective number of looks used to form the sample coherence. Must be at least 1.
                     # A higher number of looks means higher confidence in coherence and a narrower
-                    # coherence cost model. Very large values (above ~80 looks) are capped for the
-                    # cost model since the phase PDF has effectively converged by then.
+                    # coherence cost model. Values above 300 looks are clamped to 300 (with a warning).
                     # If not specified, nlooks (n_e) is estimated as:
                     # $$
                     # n_e = \frac{d_r d_a}{\rho_r \rho_a}
@@ -880,15 +879,17 @@ runconfig:
                     interp_min_radius: 0
                     # Gaussian distance-weighting falloff for the neighbor average.
                     interp_alpha: 0.75
-                    # Coherence below which pixels are labeled 0 (background) in the connected
-                    # components. "auto" uses 0.32/sqrt(nlooks); pass a float for a fixed cutoff,
-                    # or leave unset to disable the cutoff and use conncomp_reliability instead.
-                    # Takes precedence over conncomp_reliability.
-                    conncomp_min_coherence: auto
-                    # Lower-level conservativeness knob for the connected components, in
-                    # inverse-variance (1/sigma2) units, so values are small. Used only when
-                    # conncomp_min_coherence is unset. 0 labels essentially every reliably
-                    # unwrapped pixel; raise to cut more low-coherence interior edges.
+                    # Optional coherence cutoff for the connected components: pixels roughly below
+                    # it are labeled 0 (background). Leave unset (the default) to use
+                    # conncomp_reliability instead. "auto" uses 0.32/sqrt(nlooks); a float sets a
+                    # fixed cutoff. When set, it takes precedence over conncomp_reliability.
+                    conncomp_min_coherence:
+                    # Conservativeness of the connected components, in inverse-variance (1/sigma2)
+                    # units, so values are small. An edge is cut when shifting the unwrapped phase
+                    # by one cycle across it costs no more than this. The default 0.5 drops
+                    # decorrelated water and near-noise (roughly a coherence cutoff of 0.1,
+                    # depending on nlooks) while keeping low-coherence land. 0 labels essentially
+                    # every unwrapped pixel. Used only when conncomp_min_coherence is unset.
                     conncomp_reliability: 0.5
                     # Discard connected components smaller than this many pixels.
                     min_size_px: 100
